@@ -1487,6 +1487,8 @@
       onSnapshot,
       getDocs,
       getDoc,
+      getDocsFromServer,
+      getDocFromServer,
       query,
       orderBy
     } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -2872,18 +2874,38 @@ Zalo hỗ trợ: ${state.config.zalo}`;
       }
     }
 
+    async function fetchDocsBypassCache(colName) {
+      try {
+        return await getDocsFromServer(collection(db, colName));
+      } catch (_) {
+        return await getDocs(collection(db, colName));
+      }
+    }
+
+    async function fetchDocBypassCache(colName, docId) {
+      try {
+        return await getDocFromServer(doc(db, colName, docId));
+      } catch (_) {
+        return await getDoc(doc(db, colName, docId));
+      }
+    }
+
     async function pullLatestFromFirestore() {
       try {
-        const prodSnap = await getDocs(collection(db, "products"));
+        const prodSnap = await fetchDocsBypassCache("products");
         const cloudProds = prodSnap.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
-        if (cloudProds.length) {
-          state.products = cloudProds;
-          state.cloudConnected = true;
-          saveLocalState();
+        state.products = cloudProds;
+        state.cloudConnected = true;
+        saveLocalState();
+        const badge = document.getElementById("cloudBadge");
+        if (badge) {
+          badge.textContent = `Đồng bộ mọi thiết bị (${cloudProds.length} SP)`;
+          badge.style.color = "#86efac";
         }
-        const ordSnap = await getDocs(collection(db, "orders"));
+
+        const ordSnap = await fetchDocsBypassCache("orders");
         const cloudOrders = ordSnap.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -2891,7 +2913,8 @@ Zalo hỗ trợ: ${state.config.zalo}`;
           state.orders = cloudOrders;
           saveLocalState();
         }
-        const cfgSnap = await getDoc(doc(db, "settings", "store_config"));
+
+        const cfgSnap = await fetchDocBypassCache("settings", "store_config");
         if (cfgSnap.exists()) {
           state.config = { ...DEFAULT_CONFIG, ...cfgSnap.data() };
           saveLocalState();
@@ -3053,6 +3076,29 @@ Zalo hỗ trợ: ${state.config.zalo}`;
       renderAll();
       showSyncNotice(state.cloudConnected ? "Đã đồng bộ acc & sản phẩm mới nhất" : "Đã làm mới dữ liệu");
     });
+
+    window.addEventListener("pageshow", () => {
+      pullLatestFromFirestore();
+    });
+
+    window.addEventListener("focus", () => {
+      pullLatestFromFirestore();
+    });
+
+    setInterval(() => {
+      if (document.visibilityState === "visible") {
+        pullLatestFromFirestore();
+      }
+    }, 12000);
+
+    window.ZenvyDebugSync = {
+      pullNow: pullLatestFromFirestore,
+      getState: () => ({
+        cloudConnected: state.cloudConnected,
+        productCount: state.products.length,
+        products: state.products
+      })
+    };
 
     loadLocalState();
     renderAll();
